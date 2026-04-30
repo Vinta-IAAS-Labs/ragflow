@@ -79,6 +79,10 @@ def _load_apps_module(monkeypatch):
     api_utils_mod.server_error_response = _server_error_response
     monkeypatch.setitem(sys.modules, "api.utils.api_utils", api_utils_mod)
 
+    backward_compat_mod = ModuleType("api.apps.backward_compat")
+    backward_compat_mod.register_backward_compat_routes = lambda _app: None
+    monkeypatch.setitem(sys.modules, "api.apps.backward_compat", backward_compat_mod)
+
     module_name = "test_apps_init_unit_module"
     module_path = repo_root / "api" / "apps" / "__init__.py"
     spec = importlib.util.spec_from_file_location(module_name, module_path)
@@ -108,15 +112,14 @@ def test_module_init_and_unauthorized_message_variants(monkeypatch):
         def __repr__(self):
             return "Unauthorized 401 from upstream"
 
-    class _OtherRepr:
-        def __repr__(self):
-            return "Forbidden 403"
+    class _WithDescription:
+        description = "Custom description"
 
     assert apps_module._unauthorized_message(None) == apps_module.UNAUTHORIZED_MESSAGE
     assert apps_module._unauthorized_message(_BrokenRepr()) == apps_module.UNAUTHORIZED_MESSAGE
     assert apps_module._unauthorized_message(_ExactUnauthorizedRepr()) == apps_module.UNAUTHORIZED_MESSAGE
     assert apps_module._unauthorized_message(_Unauthorized401Repr()) == "Unauthorized 401 from upstream"
-    assert apps_module._unauthorized_message(_OtherRepr()) == apps_module.UNAUTHORIZED_MESSAGE
+    assert apps_module._unauthorized_message(_WithDescription()) == "Custom description"
 
 
 @pytest.mark.p2

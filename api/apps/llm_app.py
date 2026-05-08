@@ -29,6 +29,23 @@ from rag.utils.base64_image import test_image
 from rag.llm import EmbeddingModel, ChatModel, RerankModel, CvModel, TTSModel, OcrModel, Seq2txtModel
 
 
+def _resolve_my_llm_is_tools(o_dict: dict) -> bool:
+    decode_api_key_config = getattr(TenantLLMService, "_decode_api_key_config", None)
+    if callable(decode_api_key_config):
+        _, is_tools, _ = decode_api_key_config(o_dict.get("api_key", ""))
+        if is_tools is not None:
+            return bool(is_tools)
+
+    try:
+        base_name, fid = TenantLLMService.split_model_name_and_factory(o_dict["llm_name"])
+        llm_cfg = LLMService.query(llm_name=base_name, fid=fid) if fid else LLMService.query(llm_name=base_name)
+        if not llm_cfg and fid:
+            llm_cfg = LLMService.query(llm_name=base_name)
+        return bool(llm_cfg[0].is_tools) if llm_cfg else False
+    except Exception:
+        return False
+
+
 @manager.route("/factories", methods=["GET"])  # noqa: F821
 @login_required
 def factories():
@@ -94,17 +111,21 @@ async def set_api_key():
             assert factory in ChatModel, f"Chat model from {factory} is not supported yet."
             mdl = ChatModel[factory](req["api_key"], llm.llm_name, base_url=base_url, **extra)
             try:
-                m, tc = await asyncio.wait_for(
-                    mdl.async_chat(
+                async def check_streamly():
+                    async for chunk in mdl.async_chat_streamly(
                         None,
-                        [{"role": "user", "content": "Hello! How are you doing!"}],
-                        {"temperature": 0.9, "max_tokens": 50},
-                    ),
-                    timeout=timeout_seconds,
-                )
-                if m.find("**ERROR**") >= 0:
-                    raise Exception(m)
-                chat_passed = True
+                        [{"role": "user", "content": "Hi"}],
+                        {"temperature": 0.9},
+                    ):
+                        if chunk and isinstance(chunk, str) and chunk.find("**ERROR**") < 0:
+                            return True
+                    return False
+
+                result = await asyncio.wait_for(check_streamly(), timeout=timeout_seconds)
+                if result:
+                    chat_passed = True
+                else:
+                    raise Exception("No valid response received")
             except Exception as e:
                 msg += f"\nFail to access model({llm.fid}/{llm.llm_name}) using this api key." + str(e)
         elif not rerank_passed and llm.model_type == LLMType.RERANK.value:
@@ -127,7 +148,7 @@ async def set_api_key():
 
     if req.get("verify", False):
         return get_json_result(data={"message": msg, "success": len(msg.strip())==0})
-    
+
     if msg:
         return get_data_error_result(message=msg)
 
@@ -222,6 +243,22 @@ async def add_llm():
     elif factory == "PaddleOCR":
         api_key = apikey_json(["api_key", "provider_order"])
 
+    elif factory == "OpenDataLoader":
+        api_key = apikey_json(["api_key", "provider_order"])
+
+    existing_llm = None
+    existing_api_key = None
+    if req.get("api_key") is None:
+        existing_llms = TenantLLMService.query(tenant_id=current_user.id, llm_factory=factory, llm_name=llm_name)
+        if existing_llms:
+            existing_llm = existing_llms[0]
+            existing_api_key, _, existing_api_key_payload = TenantLLMService._decode_api_key_config(existing_llm.api_key)
+            if existing_api_key_payload is not None:
+                existing_api_key = existing_api_key_payload
+
+    if req.get("api_key") is None:
+        api_key = existing_api_key if existing_api_key is not None else "x"
+
     llm = {
         "tenant_id": current_user.id,
         "llm_factory": factory,
@@ -260,16 +297,19 @@ async def add_llm():
                 **extra,
             )
             try:
-                m, tc = await asyncio.wait_for(
-                    mdl.async_chat(
+                async def check_streamly():
+                    async for chunk in mdl.async_chat_streamly(
                         None,
-                        [{"role": "user", "content": "Hello! How are you doing!"}],
+                        [{"role": "user", "content": "Hi"}],
                         {"temperature": 0.9},
-                    ),
-                    timeout=timeout_seconds,
-                )
-                if not tc and m.find("**ERROR**:") >= 0:
-                    raise Exception(m)
+                    ):
+                        if chunk and isinstance(chunk, str) and chunk.find("**ERROR**:") < 0:
+                            return True
+                    return False
+
+                result = await asyncio.wait_for(check_streamly(), timeout=timeout_seconds)
+                if not result:
+                    raise Exception("No valid response received")
             except Exception as e:
                 msg += f"\nFail to access model({factory}/{mdl_nm})." + str(e)
 
@@ -339,9 +379,12 @@ async def add_llm():
 
     if req.get("verify", False):
         return get_json_result(data={"message": msg, "success": len(msg.strip()) == 0})
-    
+
     if msg:
         return get_data_error_result(message=msg)
+
+    if "is_tools" in req:
+        llm["api_key"] = TenantLLMService._encode_api_key_config(llm["api_key"], bool(req["is_tools"]))
 
     if not TenantLLMService.filter_update([TenantLLM.tenant_id == current_user.id, TenantLLM.llm_factory == factory, TenantLLM.llm_name == llm["llm_name"]], llm):
         TenantLLMService.save(**llm)
@@ -383,6 +426,7 @@ async def delete_factory():
 def my_llms():
     try:
         TenantLLMService.ensure_mineru_from_env(current_user.id)
+        TenantLLMService.ensure_opendataloader_from_env(current_user.id)
         include_details = request.args.get("include_details", "false").lower() == "true"
 
         if include_details:
@@ -403,12 +447,14 @@ def my_llms():
 
                 res[o_dict["llm_factory"]]["llm"].append(
                     {
+                        "id": o_dict["id"],
                         "type": o_dict["model_type"],
                         "name": o_dict["llm_name"],
                         "used_token": o_dict["used_tokens"],
                         "api_base": o_dict["api_base"] or "",
                         "max_tokens": o_dict["max_tokens"] or 8192,
                         "status": o_dict["status"] or "1",
+                        "is_tools": _resolve_my_llm_is_tools(o_dict),
                     }
                 )
         else:
@@ -416,7 +462,7 @@ def my_llms():
             for o in TenantLLMService.get_my_llms(current_user.id):
                 if o["llm_factory"] not in res:
                     res[o["llm_factory"]] = {"tags": o["tags"], "llm": []}
-                res[o["llm_factory"]]["llm"].append({"type": o["model_type"], "name": o["llm_name"], "used_token": o["used_tokens"], "status": o["status"]})
+                res[o["llm_factory"]]["llm"].append({"id": o["id"], "type": o["model_type"], "name": o["llm_name"], "used_token": o["used_tokens"], "status": o["status"]})
 
         return get_json_result(data=res)
     except Exception as e:
@@ -434,10 +480,12 @@ async def list_app():
         TenantLLMService.ensure_mineru_from_env(tenant_id)
         objs = TenantLLMService.query(tenant_id=tenant_id)
         facts = set([o.to_dict()["llm_factory"] for o in objs if o.api_key and o.status == StatusEnum.VALID.value])
+        tenant_llm_mapping = {f"{o.llm_name}@{o.llm_factory}": o for o in objs}
         status = {(o.llm_name + "@" + o.llm_factory) for o in objs if o.status == StatusEnum.VALID.value}
         llms = LLMService.get_all()
         llms = [m.to_dict() for m in llms if m.status == StatusEnum.VALID.value and m.fid not in weighted and (m.fid == "Builtin" or (m.llm_name + "@" + m.fid) in status)]
         for m in llms:
+            m["id"] = tenant_llm_mapping.get(m["llm_name"] + "@" + m["fid"], TenantLLM(id=None)).id
             m["available"] = m["fid"] in facts or m["llm_name"].lower() == "flag-embedding" or m["fid"] in self_deployed
             if "tei-" in os.getenv("COMPOSE_PROFILES", "") and m["model_type"] == LLMType.EMBEDDING and m["fid"] == "Builtin" and m["llm_name"] == os.getenv("TEI_MODEL", ""):
                 m["available"] = True
@@ -446,7 +494,7 @@ async def list_app():
         for o in objs:
             if o.llm_name + "@" + o.llm_factory in llm_set:
                 continue
-            llms.append({"llm_name": o.llm_name, "model_type": o.model_type, "fid": o.llm_factory, "available": True, "status": StatusEnum.VALID.value})
+            llms.append({"id": o.id, "llm_name": o.llm_name, "model_type": o.model_type, "fid": o.llm_factory, "available": True, "status": StatusEnum.VALID.value})
 
         res = {}
         for m in llms:

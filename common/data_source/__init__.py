@@ -24,6 +24,7 @@ SOFTWARE.
 """
 
 from .blob_connector import BlobStorageConnector
+from .rss_connector import RSSConnector
 from .slack_connector import SlackConnector
 from .gmail_connector import GmailConnector
 from .notion_connector import NotionConnector
@@ -33,15 +34,19 @@ from .dropbox_connector import DropboxConnector
 from .google_drive.connector import GoogleDriveConnector
 from .jira.connector import JiraConnector
 from .sharepoint_connector import SharePointConnector
+from .onedrive_connector import OneDriveConnector
+from .outlook_connector import OutlookConnector
 from .teams_connector import TeamsConnector
 from .moodle_connector import MoodleConnector
 from .airtable_connector import AirtableConnector
+from .dingtalk_ai_table_connector import DingTalkAITableConnector
 from .asana_connector import AsanaConnector
 from .imap_connector import ImapConnector
 from .zendesk_connector import ZendeskConnector
 from .seafile_connector import SeaFileConnector
 from .rdbms_connector import RDBMSConnector
 from .webdav_connector import WebDAVConnector
+from .rest_api_connector import RestAPIConnector
 from .config import BlobType, DocumentSource
 from .models import Document, TextSection, ImageSection, BasicExpertInfo
 from .exceptions import (
@@ -54,6 +59,7 @@ from .exceptions import (
 
 __all__ = [
     "BlobStorageConnector",
+    "RSSConnector",
     "SlackConnector",
     "GmailConnector",
     "NotionConnector",
@@ -63,6 +69,8 @@ __all__ = [
     "GoogleDriveConnector",
     "JiraConnector",
     "SharePointConnector",
+    "OneDriveConnector",
+    "OutlookConnector",
     "TeamsConnector",
     "MoodleConnector",
     "BlobType",
@@ -83,4 +91,6 @@ __all__ = [
     "SeaFileConnector",
     "RDBMSConnector",
     "WebDAVConnector",
+    "DingTalkAITableConnector",
+    "RestAPIConnector",
 ]

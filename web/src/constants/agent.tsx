@@ -33,6 +33,7 @@ export enum AgentGlobals {
   SysConversationTurns = 'sys.conversation_turns',
   SysFiles = 'sys.files',
   SysHistory = 'sys.history',
+  SysDate = 'sys.date',
 }
 
 export const AgentGlobalsSysQueryWithBrace = `{${AgentGlobals.SysQuery}}`;
@@ -69,8 +70,8 @@ export enum DataflowOperator {
   Note = 'Note',
   Parser = 'Parser',
   Tokenizer = 'Tokenizer',
-  Splitter = 'Splitter',
-  HierarchicalMerger = 'HierarchicalMerger',
+  TokenChunker = 'TokenChunker',
+  TitleChunker = 'TitleChunker',
   Extractor = 'Extractor',
 }
 
@@ -107,7 +108,8 @@ export enum Operator {
   UserFillUp = 'UserFillUp',
   StringTransform = 'StringTransform',
   SearXNG = 'SearXNG',
-  PDFGenerator = 'PDFGenerator',
+  DocGenerator = 'DocGenerator',
+  Browser = 'Browser',
   Placeholder = 'Placeholder',
   DataOperations = 'DataOperations',
   ListOperations = 'ListOperations',
@@ -116,8 +118,8 @@ export enum Operator {
   File = 'File', // pipeline
   Parser = 'Parser',
   Tokenizer = 'Tokenizer',
-  Splitter = 'Splitter',
-  HierarchicalMerger = 'HierarchicalMerger',
+  TokenChunker = 'TokenChunker',
+  TitleChunker = 'TitleChunker',
   Extractor = 'Extractor',
   Loop = 'Loop',
   LoopStart = 'LoopItem',
@@ -272,5 +274,6 @@ export const EmptyDsl = {
     [AgentGlobals.SysConversationTurns]: 0,
     [AgentGlobals.SysFiles]: [],
     [AgentGlobals.SysHistory]: [],
+    [AgentGlobals.SysDate]: '',
   },
 };
